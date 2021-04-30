@@ -11,7 +11,6 @@ TIMESTEP = .1 # NOTE: atm this is roughly equivalent to the length of a slotfram
 class VeloAgent(agent.Agent):
     def __init__(self, world, coordinates, color, agent_counter=0, velocities = None):
         super().__init__(world, coordinates, color)
-        self.velocities = (0.0,) * 3 # self.world.grid.get_dimension_count()
         self.neighbors = []
 
     # change in time is one round
@@ -46,3 +45,6 @@ class VeloAgent(agent.Agent):
     # adds to the velocities.
     def add_velocities(self, dv):
         self.velocities = tuple(np.add(self.velocities, dv))
+
+    def get_velocities(self):
+        return tuple(self.velocities)

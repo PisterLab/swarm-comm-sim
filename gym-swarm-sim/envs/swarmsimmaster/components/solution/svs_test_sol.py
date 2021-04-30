@@ -15,6 +15,10 @@ offense_clr = [255, 0, 0, 1]
 defense_center = [-10, 0, 0]
 offense_center = [10, 0, 0]
 
+k_max_concurrent_targets = 1
+k_target_rad = 0.25
+k_max_defender_kills = 3
+
 def solution(world, stats=None):
     global terminated
 
@@ -44,7 +48,7 @@ def solution(world, stats=None):
                 stats.increment_losses()
         else:
             # defense policy applied
-            def_p4(world, defense_drones, offense_drones)
+            def_p4_intercept(world, defense_drones, offense_drones)
 
             # check deaths in offense after defense moves
             proximity_death_check(world, defense_drones, offense_drones, lambda d : 1 - 3*d)
@@ -149,8 +153,12 @@ def proximity_death_check(world, defense_drones, offense_drones, chance_func):
 # defense death check 1: defenders die after eliminating `n` attackers
 def def_death_check1(world, defense_drones, offense_drones):
     for a in defense_drones:
-        if (a.kills) >= 3:
+        if (a.kills) >= k_max_defender_kills:
             death_routine(a)
+
+def off_p0(world, defense_drones, offense_drones):
+    for a in offense_drones:
+        move_toward(a, (0, 10, 0))
 
 # off policy 1: go to center directly
 def off_p1(world, defense_drones, offense_drones):
@@ -291,11 +299,6 @@ def def_p3(world, defense_drones, offense_drones):
 # with at most `n` other defenders targeting
 # if all targeted, go to the closest attacker from center
 def def_p3point5(world, defense_drones, offense_drones):
-    # Tweakable parameters
-    n = 1
-    target_rad = 0.25
-    ###
-
     targetted = {}
 
     for a in defense_drones:
@@ -306,7 +309,7 @@ def def_p3point5(world, defense_drones, offense_drones):
         flag = False
         for x in self_sorted_offense:
             off_dist = np.linalg.norm(np.array(x.coordinates) - np.array(defense_center))
-            if (targetted.setdefault(x.coordinates, 0) <= n) and off_dist >= self_dist - target_rad:
+            if (targetted.setdefault(x.coordinates, 0) <= k_max_concurrent_targets-1) and off_dist >= self_dist - k_target_rad:
                 flag = True
                 targetted[x.coordinates] += 1
                 move_toward(a, x.coordinates)
@@ -317,13 +320,34 @@ def def_p3point5(world, defense_drones, offense_drones):
             closest_offense = sorted_offense[0]
             move_toward(a, closest_offense.coordinates)
 
+
+def def_p3point5_intercept(world, defense_drones, offense_drones):
+    targetted = {}
+
+    for defense in defense_drones:
+        self_sorted_offense = sorted(offense_drones, key=lambda x: np.linalg.norm(
+            np.array(x.coordinates) - np.array(defense.coordinates)))
+
+        flag = False
+        for offense in self_sorted_offense:
+            lookahead = get_intercept(offense, defense)
+            if (targetted.setdefault(offense.coordinates, 0) <= k_max_concurrent_targets-1) and lookahead is not None \
+                    and np.linalg.norm(np.array(lookahead) - np.array(defense_center)) > k_target_rad:
+                flag = True
+                targetted[offense.coordinates] += 1
+                move_toward(defense, lookahead)
+                break
+        if not flag:
+            sorted_offense = sorted(offense_drones,
+                                    key=lambda x: np.linalg.norm(np.array(x.coordinates) - np.array(defense_center)))
+            closest_offense = sorted_offense[0]
+            move_toward(defense, closest_offense.coordinates)
+
 # def policy 4: half the drones follow def policy 3.5 as usual
 # other half only attack drones within `radius` of the center (following def policy 3.5)
 def def_p4(world, defense_drones, offense_drones):
     # Tweakable parameters
     def_radius = 3
-    n = 2
-    target_rad = 0.25
     ###
 
     patrollers = []
@@ -341,7 +365,7 @@ def def_p4(world, defense_drones, offense_drones):
 
         flag = False
         for x in sorted_near_offense:
-            if (targetted.setdefault(x.coordinates, 0) <= n) and np.linalg.norm(np.array(x.coordinates) - np.array(defense_center)) >= np.linalg.norm(np.array(a.coordinates) - np.array(defense_center)) - target_rad:
+            if (targetted.setdefault(x.coordinates, 0) <= k_max_concurrent_targets-1) and np.linalg.norm(np.array(x.coordinates) - np.array(defense_center)) >= np.linalg.norm(np.array(a.coordinates) - np.array(defense_center)) - k_target_rad:
                 flag = True
                 targetted[x.coordinates] += 1
                 move_toward(a, x.coordinates)
@@ -356,6 +380,46 @@ def def_p4(world, defense_drones, offense_drones):
         def_p3point5(world, defense_drones[len(patrollers):], far_offense)
     else:
         def_p3point5(world, defense_drones[len(patrollers):], near_offense)
+
+# def policy 4: half the drones follow def policy 3.5 as usual
+# other half only attack drones within `radius` of the center (following def policy 3.5)
+def def_p4_intercept(world, defense_drones, offense_drones):
+    # Tweakable parameters
+    def_radius = 3
+    ###
+
+    patrollers = []
+    targetted = {}
+
+    for i in range(len(defense_drones)//2):
+        patrollers.append(defense_drones[i])
+
+    near_offense = list(filter(lambda x: (np.linalg.norm(np.array(x.coordinates) - np.array(defense_center))) < def_radius, offense_drones))
+    far_offense = list(filter(lambda x: (np.linalg.norm(np.array(x.coordinates) - np.array(defense_center))) >= def_radius, offense_drones))
+
+    for patroller in patrollers:
+        sorted_near_offense = sorted(near_offense, key=lambda x: np.linalg.norm(
+            np.array(x.coordinates) - np.array(patroller.coordinates)))
+
+        flag = False
+        for offense in sorted_near_offense:
+            lookahead = get_intercept(offense, patroller)
+            if (targetted.setdefault(offense.coordinates, 0) <= k_max_concurrent_targets-1) and lookahead is not None \
+                    and np.linalg.norm(np.array(lookahead) - np.array(defense_center)) > k_target_rad:
+                flag = True
+                targetted[offense.coordinates] += 1
+                move_toward(patroller, lookahead)
+                break
+        if not flag:
+            if patroller.coordinates[0] <= defense_center[0]:
+                move_toward(patroller, [defense_center[0] + 1, patroller.coordinates[1], patroller.coordinates[2]])
+            else:
+                move_threshold(patroller, defense_center, 0, 1)
+
+    if far_offense:
+        def_p3point5_intercept(world, defense_drones[len(patrollers):], far_offense)
+    else:
+        def_p3point5_intercept(world, defense_drones[len(patrollers):], near_offense)
 
 def get_drones(world, clr):
     lst = []
@@ -376,6 +440,50 @@ def move_toward(agent, target, thres=0.001):
         agent.move_to(speed_limit(vec, agent))
         return True
     return False
+
+def in_range(actual, target, threshold):
+    return abs(actual - target) <= threshold
+
+
+# anticipate moving drone's location and calculate intercept loc TODO scale by speed
+# NOTE: current implementation only works if same speed
+def get_intercept(offense, defense, deadband=0.0001):
+    """
+    :param offense: offense drone to target
+    :param defense: defense drone targeting offense
+    :param deadband: threshold for ignoring value
+    :return: intercept location
+    """
+    if in_range(offense.get_velocities()[0], 0, deadband) and in_range(offense.get_velocities()[1], 0, deadband):
+        return offense.coordinates
+
+    # m2(y - b) = m1(x - a)
+    x_coeff_offense = offense.get_velocities()[1]
+    y_coeff_offense = offense.get_velocities()[0]
+
+    x_coeff_intersect = offense.coordinates[0] - defense.coordinates[0]
+    y_coeff_intersect = - (offense.coordinates[1] - defense.coordinates[1])
+
+    if in_range(y_coeff_intersect/x_coeff_intersect, y_coeff_offense/x_coeff_offense, deadband):
+        return None
+
+    c_intersect = np.array([[(offense.coordinates[0] + defense.coordinates[0]) / 2],
+                            [(offense.coordinates[1] + defense.coordinates[1]) / 2]], dtype="float")
+
+    dep1 = y_coeff_offense * offense.coordinates[1] - x_coeff_offense * offense.coordinates[0]
+    dep2 = y_coeff_intersect * c_intersect[1][0] - x_coeff_intersect * c_intersect[0][0]
+
+    mat_coeff = np.array([[-x_coeff_offense, y_coeff_offense], [-x_coeff_intersect, y_coeff_intersect]], dtype="float")
+    mat_dep = np.array([[dep1], [dep2]], dtype="float")
+
+    # calculate intercept between equidistant line and offense vel vector
+    ret = np.linalg.solve(mat_coeff, mat_dep)
+
+    # check if solution lies in +dt
+    if (np.sign(offense.get_velocities()[0]) == np.sign(ret[0] - offense.coordinates[0])
+            and np.sign(offense.get_velocities()[1]) == np.sign(ret[1] - offense.coordinates[1])):
+        return tuple([ret[0][0], ret[1][0], 0])
+    return None
 
 # enforce speed limit
 def speed_limit(speed_vec, agent):

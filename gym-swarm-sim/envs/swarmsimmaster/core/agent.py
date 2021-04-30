@@ -24,6 +24,7 @@ class Agent(matter.Matter):
         self.carried_item = None
         self.carried_agent = None
         self.steps = 0
+        self.velocities = (0.0,) * 3
         csv_generator_module = importlib.import_module('components.generators.csv.%s' % world.config_data.csv_generator)
         self.csv_agent_writer = csv_generator_module.CsvAgentData(self.get_id(), self.number)
 
@@ -75,6 +76,7 @@ class Agent(matter.Matter):
         :param direction: The direction is defined by loaded grid class
         :return: True: Success Moving;  False: Non moving
         """
+        self.velocities = direction
         direction_coord = get_coordinates_in_direction(self.coordinates, direction)
         direction_coord = self.check_within_border(direction, direction_coord)
         if self.world.grid.are_valid_coordinates(direction_coord) \

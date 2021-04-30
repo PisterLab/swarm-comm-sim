@@ -7,7 +7,7 @@ offense_center = [10, 0, 0]
 
 def scenario(world):
     defense_size = 30
-    offense_size = 60
+    offense_size = 90
 
     world.add_location(tuple(defense_center), [0, 0, 255, 1])
 
